@@ -194,7 +194,7 @@ describe("omo doctor gateway rows", () => {
     expect(lines).toEqual(["PASS gateway: installed", "PASS gateway config: valid (x)", "WARN gateway surface qa/slack: options not checked"])
   })
 
-  test("#given a FAIL gateway row #when runDoctor finishes #then the process exits failing, and passes without it", () => {
+  test("#given an installed gateway with a missing host target #when the packaged CLI and doctor run #then both report load failure", () => {
     // given: a packaged install whose every other check passes
     const app = packagedOmo()
     const senpi = { "@code-yeongyu/senpi": "2026.8.9" }
@@ -204,20 +204,37 @@ describe("omo doctor gateway rows", () => {
     for (const file of ["plugin/package.json", "plugin/extensions/omo.js", "plugin/runtime/lsp-daemon/dist/cli.js"]) write(app, file, "fixture\n")
     write(app, "doctor.mjs", [
       'import { runDoctor } from "./bin/lib/doctor.js"',
-      "runDoctor({ harnesses: [] }, [], { gateway: JSON.parse(process.argv[2]), fetchDistTags: () => ({}), list: () => [], listDirs: () => [], hasRepo: () => false })",
+      'import { gatewayDoctorLines } from "./bin/lib/gateway.js"',
+      "runDoctor({ harnesses: [] }, [], { gateway: process.argv[2] ? JSON.parse(process.argv[2]) : await gatewayDoctorLines(), fetchDistTags: () => ({}), list: () => [], listDirs: () => [], hasRepo: () => false })",
     ].join("\n"))
-    const doctor = (gateway: string[]) => spawnSync(process.execPath, [join(app, "doctor.mjs"), JSON.stringify(gateway)], {
+    const env = { ...home('{"gateway":{}}'), PATH: process.env.PATH ?? "", OMO_CODING_AGENT_DIR: join(app, "agent") }
+    const doctor = (gateway?: string[]) => spawnSync(process.execPath, [join(app, "doctor.mjs"), ...(gateway ? [JSON.stringify(gateway)] : [])], {
+      cwd: app,
       encoding: "utf8",
-      env: { ...process.env, OMO_CODING_AGENT_DIR: join(app, "agent") },
+      env,
     })
 
     // when
     const control = doctor(["PASS gateway: installed"])
     const failing = doctor(["PASS gateway: installed", "FAIL gateway config: x"])
+    const absent = doctor()
+    write(app, "node_modules/@oh-my-opencode/omo-gateway/package.json", JSON.stringify({
+      name: "@oh-my-opencode/omo-gateway", type: "module", exports: { "./host": "./absent.js" },
+    }))
+    const broken = doctor()
+    const cli = spawnSync(process.execPath, [join(app, "bin/omo.js"), "gateway", "status"], {
+      cwd: app, encoding: "utf8", env,
+    })
 
     // then
     expect(control.status).toBe(0)
     expect(failing.stdout).toContain("FAIL gateway config: x")
     expect(failing.status).toBe(1)
+    expect(absent.status).toBe(0)
+    expect(absent.stdout).toContain(`WARN gateway: ${GATEWAY_NOT_INSTALLED}`)
+    expect(broken.stdout).toContain("FAIL gateway: cannot load @oh-my-opencode/omo-gateway/host:")
+    expect(broken.status).toBe(1)
+    expect(cli.status).toBe(1)
+    expect(cli.stderr).toStartWith("omo gateway: cannot load @oh-my-opencode/omo-gateway/host:")
   })
 })

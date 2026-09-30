@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs"
+import { createRequire } from "node:module"
 import { join } from "node:path"
 import { canonicalAgentDir, runtimeHome } from "./agent-dir.js"
 import { parseJsonc } from "./jsonc.js"
@@ -39,7 +40,11 @@ function isMissingPackage(error) {
   if (!(error instanceof Error)) return false
   const code = "code" in error ? error.code : undefined
   if (code !== "ERR_MODULE_NOT_FOUND" && code !== "MODULE_NOT_FOUND") return false
-  return error.message.includes(`'${GATEWAY_PACKAGE}`) || error.message.includes(`"${GATEWAY_PACKAGE}`)
+  if (!error.message.includes(`'${GATEWAY_PACKAGE}`) && !error.message.includes(`"${GATEWAY_PACKAGE}`)) return false
+  // Bun also names the package when its exported host file is absent. Check the
+  // package directory without resolving an entry that exports may hide or break.
+  const searchPaths = createRequire(import.meta.url).resolve.paths(GATEWAY_PACKAGE) ?? []
+  return !searchPaths.some((path) => existsSync(join(path, GATEWAY_PACKAGE)))
 }
 
 /** `omo gateway <args>`: the installed package runs it; without the package, one stderr line and exit 1. */
