@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdirSync, renameSync, rmSync, symlinkSync } from "node:fs"
 import { join } from "node:path"
+import { pathToFileURL } from "node:url"
 import { drive, FIXTURE_HOST, GATEWAY_DIR, GATEWAY_MANIFEST, home, packagedOmo, removeGatewayRoots, write } from "./gateway.test-support"
 
 afterEach(removeGatewayRoots)
@@ -85,6 +86,8 @@ describe("omo verifies the installed gateway package before importing its host e
       args: ["connect"],
       agentDir: join(env.HOME, ".omo", "agent"),
       home: env.HOME,
+      pluginRoot: join(app, "plugin"),
+      threadSdkUrl: pathToFileURL(join(app, "plugin", "runtime", "thread-sdk", "sdk.js")).href,
       launch: ["omo-under-test", "gateway", "connect"],
     })
   })

@@ -1,8 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
+import { existsSync, symlinkSync } from "node:fs"
 import { join } from "node:path"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import { GATEWAY_NOT_INSTALLED, gatewayDoctorLines, runGatewayCommand } from "../bin/lib/gateway.js"
-import { drive, FIXTURE_HOST, home, packagedOmo, removeGatewayRoots, write } from "./gateway.test-support"
+import { packageRoot } from "../bin/lib/package-paths.js"
+import { drive, FIXTURE_HOST, home, packagedOmo, removeGatewayRoots, tempRoot, write } from "./gateway.test-support"
+
+const THREAD_SDK = join("runtime", "thread-sdk", "sdk.js")
 
 afterEach(removeGatewayRoots)
 
@@ -61,8 +66,43 @@ describe("omo gateway resolves a separately installed package", () => {
       args: ["connect", "--scope", "qa"],
       agentDir: join(env.HOME, ".omo", "agent"),
       home: env.HOME,
+      pluginRoot: join(app, "plugin"),
+      threadSdkUrl: pathToFileURL(join(app, "plugin", THREAD_SDK)).href,
       launch: ["omo-under-test", "gateway", "connect"],
     })
+  })
+
+  test("#given an install without the thread SDK file #when omo gateway runs #then the host still gets the plugin root and the SDK file URL inside it", () => {
+    // given
+    const app = packagedOmo(FIXTURE_HOST)
+
+    // when
+    const result = drive(app, ["status"], home())
+    const received = JSON.parse(result.stdout)
+
+    // then
+    expect(result.status).toBe(7)
+    expect(received.pluginRoot).toBe(join(app, "plugin"))
+    expect(new URL(received.threadSdkUrl).protocol).toBe("file:")
+    expect(received.threadSdkUrl).toEndWith("/runtime/thread-sdk/sdk.js")
+    expect(fileURLToPath(received.threadSdkUrl)).toBe(join(received.pluginRoot, THREAD_SDK))
+    expect(existsSync(fileURLToPath(received.threadSdkUrl))).toBe(false)
+  })
+
+  test("#given omo launched from a symlinked install #when omo gateway runs #then the plugin root and SDK URL name the real install", () => {
+    // given
+    const app = packagedOmo(FIXTURE_HOST)
+    const linked = join(tempRoot("omo-gateway-hook-link-"), "omo-ai")
+    symlinkSync(app, linked, "dir")
+
+    // when
+    const result = drive(linked, ["status"], home())
+    const received = JSON.parse(result.stdout)
+
+    // then
+    expect(result.status).toBe(7)
+    expect(received.pluginRoot).toBe(join(app, "plugin"))
+    expect(received.threadSdkUrl).toBe(pathToFileURL(join(app, "plugin", THREAD_SDK)).href)
   })
 
   test("#given an installed package on another host contract #when omo gateway runs #then it names both versions and exits 1", () => {
@@ -133,6 +173,24 @@ describe("omo doctor gateway rows", () => {
 
     // then
     expect(lines).toEqual(["PASS gateway: installed", "PASS gateway config: valid (x)", "WARN gateway surface qa/slack: options not checked"])
+  })
+
+  test("#given a gateway section and the package installed #when doctor asks #then the package's doctor gets the plugin root and the thread SDK URL", async () => {
+    // given
+    const received: Record<string, unknown>[] = []
+    const importHost = async () => ({
+      HOST_CONTRACT_VERSION: 1,
+      runGatewayCommand: async () => 0,
+      gatewayDoctorLines: async (options: Record<string, unknown>) => { received.push(options); return [] },
+    })
+
+    // when
+    await gatewayDoctorLines({ env: home('{"gateway":{}}'), importHost })
+
+    // then
+    expect(received).toHaveLength(1)
+    expect(received[0]?.pluginRoot).toBe(join(packageRoot, "plugin"))
+    expect(received[0]?.threadSdkUrl).toBe(pathToFileURL(join(packageRoot, "plugin", THREAD_SDK)).href)
   })
 
   test("#given an installed gateway with a missing host target #when the packaged CLI and doctor run #then both report load failure", () => {

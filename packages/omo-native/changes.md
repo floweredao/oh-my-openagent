@@ -1,3 +1,13 @@
+## 2026-09-30 - The gateway host receives omo's plugin root and the thread SDK URL (#9243)
+
+`runGatewayCommand` and the doctor call into the installed gateway now also pass `pluginRoot`, omo's staged plugin
+payload (`<packageRoot>/plugin`, from `package-paths.js` as doctor resolves it), and `threadSdkUrl`, the `file:` URL of
+`<pluginRoot>/runtime/thread-sdk/sdk.js`, so the gateway neither derives the install from `argv[1]` nor knows the
+payload layout. Both come from the hook's own module URL, so a symlinked install hands over the real install's paths.
+The SDK file ships with the thread SDK (#9222); until then the URL names a file that does not exist yet, and omo does
+not check it, so `omo gateway` behaves as before. `test/gateway.test.ts` covers the command (plain and symlinked
+install) and the doctor call; each case fails with its field removed.
+
 ## 2026-09-30 - The gateway hook verifies the installed package before importing it (#9243)
 
 Before `bin/lib/gateway.js` imports `@oh-my-opencode/omo-gateway/host`, `verifyGatewayPackage` finds the package's

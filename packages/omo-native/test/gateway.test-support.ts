@@ -18,7 +18,8 @@ export const GATEWAY_MANIFEST = {
 export const FIXTURE_HOST = [
   "export const HOST_CONTRACT_VERSION = 1",
   "export async function runGatewayCommand(args, context) {",
-  "  context.stdout.write(JSON.stringify({ args, agentDir: context.agentDir, home: context.home, launch: context.launch }) + '\\n')",
+  "  const { agentDir, home, pluginRoot, threadSdkUrl, launch } = context",
+  "  context.stdout.write(JSON.stringify({ args, agentDir, home, pluginRoot, threadSdkUrl, launch }) + '\\n')",
   "  return 7",
   "}",
   "export async function gatewayDoctorLines() { return [] }",

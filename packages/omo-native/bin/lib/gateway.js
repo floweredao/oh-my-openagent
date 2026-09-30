@@ -4,6 +4,7 @@ import { isAbsolute, join, relative, sep } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { canonicalAgentDir, runtimeHome } from "./agent-dir.js"
 import { parseJsonc } from "./jsonc.js"
+import { packageRoot } from "./package-paths.js"
 
 /**
  * omo ships no gateway code. `omo gateway` and the `omo doctor` gateway rows import a separately
@@ -15,6 +16,14 @@ export const GATEWAY_PACKAGE = "@oh-my-opencode/omo-gateway"
 export const GATEWAY_HOST_ENTRY = `${GATEWAY_PACKAGE}/host`
 export const GATEWAY_HOST_CONTRACT_VERSION = 1
 export const GATEWAY_NOT_INSTALLED = `the omo gateway is not installed: install the ${GATEWAY_PACKAGE} package where omo is installed (for a global omo, \`bun add -g <package>\`), then run \`omo doctor\``
+
+// Where the gateway finds omo's plugin payload and the thread SDK in it. The SDK file ships with the thread
+// SDK itself; the URL is handed over either way and nothing here checks that the file exists.
+const PLUGIN_ROOT = join(packageRoot, "plugin")
+const PLUGIN_PATHS = {
+  pluginRoot: PLUGIN_ROOT,
+  threadSdkUrl: pathToFileURL(join(PLUGIN_ROOT, "runtime", "thread-sdk", "sdk.js")).href,
+}
 
 const GATEWAY_KEY = "gateway"
 const NATIVE_BLOCK_KEYS = ["[native]", "[senpi]"]
@@ -111,6 +120,7 @@ export async function runGatewayCommand(args, options = {}) {
     cwd,
     agentDir: canonicalAgentDir(env),
     home: runtimeHome(env),
+    ...PLUGIN_PATHS,
     launch: options.launch ?? [process.execPath, process.argv[1], "gateway", "connect"],
   })
 }
@@ -149,7 +159,7 @@ export async function gatewayDoctorLines(options = {}) {
   if (loaded.status === "missing") return [`WARN gateway: ${GATEWAY_NOT_INSTALLED}`]
   if (loaded.status === "broken") return [`FAIL gateway: ${loaded.reason}`]
   try {
-    return ["PASS gateway: installed", ...(await loaded.host.gatewayDoctorLines({ env, cwd }))]
+    return ["PASS gateway: installed", ...(await loaded.host.gatewayDoctorLines({ env, cwd, ...PLUGIN_PATHS }))]
   } catch (error) {
     return ["PASS gateway: installed", `WARN gateway: the gateway's doctor rows failed: ${error instanceof Error ? error.message : String(error)}`]
   }
