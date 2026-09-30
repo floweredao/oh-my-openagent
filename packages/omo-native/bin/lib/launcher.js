@@ -259,19 +259,26 @@ export async function runLauncher(args = process.argv.slice(2)) {
   if (command === "doctor") {
     // Doctor is a launch too: it reports only what the launch-time preparation could not fix.
     preparePluginLaunchSpec({ pluginRoot: join(packageRoot, "plugin") })
-    const [categoryCoverage, computerUse, configDiagnostics] = args[1] === "--reap"
-      ? [[], [], []]
+    const [categoryCoverage, computerUse, configDiagnostics, gateway] = args[1] === "--reap"
+      ? [[], [], [], []]
       : await Promise.all([
           doctorCoverageLines({ agentDir: canonicalAgentDir() }),
           doctorComputerUseLines(),
           doctorConfigLines(),
+          import("./gateway.js").then((hook) => hook.gatewayDoctorLines()),
         ])
     runDoctor(await detectHarnesses(), args.slice(1), {
       daemonEngine: { run: engineHostCall },
       categoryCoverage,
       computerUse,
       configDiagnostics,
+      gateway,
     })
+    return
+  }
+  if (command === "gateway") {
+    const { runGatewayCommand } = await import("./gateway.js")
+    process.exitCode = await runGatewayCommand(args.slice(1))
     return
   }
   if (command === "setup") {

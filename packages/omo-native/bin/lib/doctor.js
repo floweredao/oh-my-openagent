@@ -413,8 +413,9 @@ export function runDoctor(inventory, args = [], options = {}) {
   const launchSpec = launchSpecDoctorLines(options.pluginRoot ?? join(packageRoot, "plugin"), options.launchSpecIo)
   if (launchSpec.some((line) => line.startsWith("FAIL "))) failed = true
   lines.push(...launchSpec)
-  lines.push(...daemonReport(options), ...(options.computerUse ?? []), ...(options.categoryCoverage ?? []))
+  lines.push(...daemonReport(options), ...(options.computerUse ?? []), ...(options.categoryCoverage ?? []), ...(options.gateway ?? []))
   if ((options.computerUse ?? []).some((line) => line.startsWith("FAIL "))) failed = true
+  if ((options.gateway ?? []).some((line) => line.startsWith("FAIL "))) failed = true
   if (needsSetupSuggestion(inventory)) {
     lines.push("INFO no credentials found; run omo setup to review sibling stores")
   }
