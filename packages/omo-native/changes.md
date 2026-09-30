@@ -1,3 +1,15 @@
+## 2026-09-30 - The gateway hook verifies the installed package before importing it (#9243)
+
+Before `bin/lib/gateway.js` imports `@oh-my-opencode/omo-gateway/host`, `verifyGatewayPackage` finds the package's
+`package.json` on the same resolver search paths the import walks and refuses the package, as `broken` with a reason that
+names its directory, unless the manifest `name` is exactly `@oh-my-opencode/omo-gateway`, it declares
+`omoGateway.hostContract` equal to 1 (the runtime `HOST_CONTRACT_VERSION` check stays), and the host entry the import
+resolves stays inside the package directory once symlinks are resolved on both sides. A refused package never runs:
+`omo gateway` prints the reason and exits 1, the doctor gateway row is `FAIL`. No package directory is still `missing`, and
+nothing changes for an install without the package. `test/gateway-integrity.test.ts` (5 cases) covers a foreign name, a
+missing and a mismatched manifest contract, a host entry symlinked out of the package, and a verified package reached
+through a symlinked package directory; each fails with its check removed.
+
 ## 2026-09-30 - `omo gateway` and the doctor gateway rows load a separately installed gateway package (#9243)
 
 `bin/lib/gateway.js` is a hook, not a gateway: `omo gateway <args>` imports `@oh-my-opencode/omo-gateway/host` by bare

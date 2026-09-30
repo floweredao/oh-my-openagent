@@ -1,28 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
-import { cpSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { dirname, join, resolve } from "node:path"
-import { fileURLToPath } from "node:url"
+import { join } from "node:path"
 import { GATEWAY_NOT_INSTALLED, gatewayDoctorLines, runGatewayCommand } from "../bin/lib/gateway.js"
+import { drive, FIXTURE_HOST, home, packagedOmo, removeGatewayRoots, write } from "./gateway.test-support"
 
-const SOURCE_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)))
-const roots: string[] = []
-
-afterEach(() => {
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
-})
-
-function tempRoot(prefix: string): string {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), prefix)))
-  roots.push(root)
-  return root
-}
-
-function write(root: string, path: string, content: string): void {
-  mkdirSync(dirname(join(root, path)), { recursive: true })
-  writeFileSync(join(root, path), content)
-}
+afterEach(removeGatewayRoots)
 
 function sink(): { write: (text: string) => void; text: () => string } {
   let buffer = ""
@@ -34,47 +16,6 @@ function missingPackage(): Error {
     code: "ERR_MODULE_NOT_FOUND",
   })
 }
-
-function home(userConfig?: string): { HOME: string } {
-  const root = tempRoot("omo-gateway-hook-home-")
-  mkdirSync(join(root, ".omo"), { recursive: true })
-  if (userConfig !== undefined) writeFileSync(join(root, ".omo", "omo.jsonc"), userConfig)
-  return { HOME: root }
-}
-
-function packagedOmo(gatewayHostSource?: string): string {
-  const app = tempRoot("omo-gateway-hook-app-")
-  cpSync(join(SOURCE_ROOT, "bin"), join(app, "bin"), { recursive: true })
-  write(app, "package.json", JSON.stringify({ name: "omo-ai", version: "1.2.3-test.0", type: "module" }))
-  write(app, "drive.mjs", [
-    'import { runGatewayCommand } from "./bin/lib/gateway.js"',
-    "process.exitCode = await runGatewayCommand(process.argv.slice(2), { launch: ['omo-under-test', 'gateway', 'connect'] })",
-  ].join("\n"))
-  if (gatewayHostSource !== undefined) {
-    const pkg = join("node_modules", "@oh-my-opencode", "omo-gateway")
-    write(app, join(pkg, "package.json"), JSON.stringify({ name: "@oh-my-opencode/omo-gateway", type: "module", exports: { "./host": { import: "./host.js" } } }))
-    write(app, join(pkg, "host.js"), gatewayHostSource)
-  }
-  return app
-}
-
-function drive(app: string, args: string[], env: { HOME: string }): { status: number | null; stdout: string; stderr: string } {
-  const result = spawnSync(process.execPath, [join(app, "drive.mjs"), ...args], {
-    cwd: app,
-    encoding: "utf8",
-    env: { PATH: process.env.PATH ?? "", HOME: env.HOME, OMO_CODING_AGENT_DIR: join(env.HOME, ".omo", "agent") },
-  })
-  return { status: result.status, stdout: result.stdout, stderr: result.stderr }
-}
-
-const FIXTURE_HOST = [
-  "export const HOST_CONTRACT_VERSION = 1",
-  "export async function runGatewayCommand(args, context) {",
-  "  context.stdout.write(JSON.stringify({ args, agentDir: context.agentDir, home: context.home, launch: context.launch }) + '\\n')",
-  "  return 7",
-  "}",
-  "export async function gatewayDoctorLines() { return [] }",
-].join("\n")
 
 describe("omo gateway resolves a separately installed package", () => {
   test("#given the package is not installed #when omo gateway runs #then it prints one line and exits 1", async () => {
@@ -219,7 +160,7 @@ describe("omo doctor gateway rows", () => {
     const failing = doctor(["PASS gateway: installed", "FAIL gateway config: x"])
     const absent = doctor()
     write(app, "node_modules/@oh-my-opencode/omo-gateway/package.json", JSON.stringify({
-      name: "@oh-my-opencode/omo-gateway", type: "module", exports: { "./host": "./absent.js" },
+      name: "@oh-my-opencode/omo-gateway", type: "module", exports: { "./host": "./absent.js" }, omoGateway: { hostContract: 1 },
     }))
     const broken = doctor()
     const cli = spawnSync(process.execPath, [join(app, "bin/omo.js"), "gateway", "status"], {

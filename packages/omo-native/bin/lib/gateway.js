@@ -1,6 +1,7 @@
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readFileSync, realpathSync } from "node:fs"
 import { createRequire } from "node:module"
-import { join } from "node:path"
+import { isAbsolute, join, relative, sep } from "node:path"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import { canonicalAgentDir, runtimeHome } from "./agent-dir.js"
 import { parseJsonc } from "./jsonc.js"
 
@@ -18,10 +19,16 @@ export const GATEWAY_NOT_INSTALLED = `the omo gateway is not installed: install 
 const GATEWAY_KEY = "gateway"
 const NATIVE_BLOCK_KEYS = ["[native]", "[senpi]"]
 
-export async function loadGatewayHost(importHost = () => import(GATEWAY_HOST_ENTRY)) {
+export async function loadGatewayHost(importHost) {
+  let load = importHost
+  if (load === undefined) {
+    const verified = verifyGatewayPackage()
+    if (verified.status !== "verified") return verified
+    load = () => import(verified.entryUrl)
+  }
   let host
   try {
-    host = await importHost()
+    host = await load()
   } catch (error) {
     if (isMissingPackage(error)) return { status: "missing" }
     return { status: "broken", reason: `cannot load ${GATEWAY_HOST_ENTRY}: ${error instanceof Error ? error.message : String(error)}` }
@@ -35,6 +42,45 @@ export async function loadGatewayHost(importHost = () => import(GATEWAY_HOST_ENT
   return { status: "installed", host }
 }
 
+function gatewaySearchPaths() {
+  return createRequire(import.meta.url).resolve.paths(GATEWAY_PACKAGE) ?? []
+}
+
+/**
+ * Before anything of the package runs: the nearest installed package on omo's own resolver search
+ * paths must be the one this omo expects, declare the host contract in its manifest, and export a
+ * host entry that stays inside its own directory once symlinks are resolved on both sides.
+ */
+export function verifyGatewayPackage(resolveHostEntry = (specifier) => import.meta.resolve(specifier)) {
+  const root = gatewaySearchPaths().map((path) => join(path, GATEWAY_PACKAGE)).find((dir) => existsSync(dir))
+  if (root === undefined) return { status: "missing" }
+  const refuse = (why) => ({ status: "broken", reason: `refusing the installed gateway at ${root}: ${why}` })
+  let manifest
+  try {
+    manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"))
+  } catch (error) {
+    return refuse(`cannot read its package.json: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  if (!isRecord(manifest)) return refuse("its package.json is not an object")
+  if (manifest.name !== GATEWAY_PACKAGE) return refuse(`its package.json names ${JSON.stringify(manifest.name)}, not "${GATEWAY_PACKAGE}"`)
+  const declared = isRecord(manifest.omoGateway) ? manifest.omoGateway.hostContract : undefined
+  if (declared === undefined) return refuse("its package.json does not declare omoGateway.hostContract")
+  if (declared !== GATEWAY_HOST_CONTRACT_VERSION) {
+    return refuse(`its package.json declares host contract ${JSON.stringify(declared)}, this omo speaks ${GATEWAY_HOST_CONTRACT_VERSION}`)
+  }
+  let entry
+  let realRoot
+  try {
+    entry = realpathSync(fileURLToPath(resolveHostEntry(GATEWAY_HOST_ENTRY)))
+    realRoot = realpathSync(root)
+  } catch (error) {
+    return { status: "broken", reason: `cannot load ${GATEWAY_HOST_ENTRY}: ${error instanceof Error ? error.message : String(error)}` }
+  }
+  const inside = relative(realRoot, entry)
+  if (inside === "" || inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside)) return refuse(`its host entry resolves to ${entry}, outside the package`)
+  return { status: "verified", entryUrl: pathToFileURL(entry).href }
+}
+
 // A missing module inside an installed package is broken, not missing.
 function isMissingPackage(error) {
   if (!(error instanceof Error)) return false
@@ -43,8 +89,7 @@ function isMissingPackage(error) {
   if (!error.message.includes(`'${GATEWAY_PACKAGE}`) && !error.message.includes(`"${GATEWAY_PACKAGE}`)) return false
   // Bun also names the package when its exported host file is absent. Check the
   // package directory without resolving an entry that exports may hide or break.
-  const searchPaths = createRequire(import.meta.url).resolve.paths(GATEWAY_PACKAGE) ?? []
-  return !searchPaths.some((path) => existsSync(join(path, GATEWAY_PACKAGE)))
+  return !gatewaySearchPaths().some((path) => existsSync(join(path, GATEWAY_PACKAGE)))
 }
 
 /** `omo gateway <args>`: the installed package runs it; without the package, one stderr line and exit 1. */
